@@ -1,43 +1,39 @@
 import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score
+import numpy as np
+from sklearn.model_selection import cross_val_score, StratifiedKFold
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, VotingClassifier
 from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
+from catboost import CatBoostClassifier
 
-# Last inn Titanic data
+# ----------------- Load Data -----------------
 data = pd.read_csv("titanic.csv")
 
-# ---------- Feature Engineering ----------
-# Kjønn til tall
+# Encode Sex
 data['Sex'] = data['Sex'].map({'male': 0, 'female': 1})
 
-# Manglende verdier
+# Fill missing
 data['Age'].fillna(data['Age'].median(), inplace=True)
 data['Fare'].fillna(data['Fare'].median(), inplace=True)
 data['Embarked'].fillna(data['Embarked'].mode()[0], inplace=True)
 
-# Gjør Embarked numerisk
+# Encode Embarked
 data['Embarked'] = data['Embarked'].map({'S': 0, 'C': 1, 'Q': 2})
 
-# FamilySize
+# Family features
 data['FamilySize'] = data['SibSp'] + data['Parch'] + 1
+data['IsAlone'] = (data['FamilySize'] == 1).astype(int)
 
-# IsAlone
-data['IsAlone'] = 1
-data.loc[data['FamilySize'] > 1, 'IsAlone'] = 0
-
-# Title fra Name
+# Extract Title from Name
 data['Title'] = data['Name'].str.extract(' ([A-Za-z]+)\.', expand=False)
 data['Title'] = data['Title'].replace(['Mlle', 'Ms'], 'Miss')
 data['Title'] = data['Title'].replace(['Mme'], 'Mrs')
-data['Title'] = data['Title'].replace(
-    ['Countess','Lady','Sir','Jonkheer','Don','Dona','Rev','Col','Capt','Major','Dr'],
-    'Rare'
-)
+rare_titles = ['Countess','Lady','Sir','Jonkheer','Don','Dona','Rev','Col','Capt','Major','Dr']
+data['Title'] = data['Title'].replace(rare_titles, 'Rare')
+data = pd.get_dummies(data, columns=['Title'], drop_first=True)
 
-# One-hot encode Title (gjør kategorier til kolonner)
-data = pd.get_dummies(data, columns=['Title'])
-
-# ---------- Features ----------
+# Features
 features = [
     'Pclass','Sex','Age','SibSp','Parch','Fare','Embarked',
     'FamilySize','IsAlone'
@@ -46,26 +42,26 @@ features = [
 X = data[features]
 y = data['Survived']
 
-# ---------- Train/Test Split ----------
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
+# Standardize numerical columns
+scaler = StandardScaler()
+X[['Age','Fare','FamilySize']] = scaler.fit_transform(X[['Age','Fare','FamilySize']])
+
+# ----------------- Ensemble Models -----------------
+rf = RandomForestClassifier(n_estimators=300, max_depth=8, random_state=42)
+gb = GradientBoostingClassifier(n_estimators=300, learning_rate=0.05, max_depth=5, random_state=42)
+xgb = XGBClassifier(n_estimators=400, max_depth=6, learning_rate=0.03, subsample=0.8,
+                    colsample_bytree=0.8, random_state=42, use_label_encoder=False, eval_metric="logloss")
+lgb = LGBMClassifier(n_estimators=400, learning_rate=0.03, max_depth=6, random_state=42)
+cat = CatBoostClassifier(iterations=400, learning_rate=0.05, depth=6, silent=True, random_state=42)
+
+# Voting ensemble (soft voting averages probabilities)
+ensemble = VotingClassifier(
+    estimators=[('rf', rf), ('gb', gb), ('xgb', xgb), ('lgb', lgb), ('cat', cat)],
+    voting='soft'
 )
 
-# ---------- XGBoost Model ----------
-model = XGBClassifier(
-    n_estimators=300,
-    max_depth=5,
-    learning_rate=0.03,
-    subsample=0.8,
-    colsample_bytree=0.8,
-    random_state=42,
-    use_label_encoder=False,
-    eval_metric="logloss"
-)
+# ----------------- Cross-validation -----------------
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+scores = cross_val_score(ensemble, X, y, cv=cv, scoring="accuracy")
 
-model.fit(X_train, y_train)
-y_pred = model.predict(X_test)
-
-# ---------- Resultat ----------
-accuracy = accuracy_score(y_test, y_pred)
-print(f"XGBoost Model Accuracy with Feature Engineering: {accuracy:.4f}")
+print(f"Ensemble Cross-Validation Accuracy: {scores.mean():.4f}")

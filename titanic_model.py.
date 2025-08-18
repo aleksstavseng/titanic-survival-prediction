@@ -1,15 +1,15 @@
-# Titanic – forbedret modell med Title & CabinLetter + Gradient Boosting
+# Titanic – pipeline med Title/CabinLetter + GridSearch på GradientBoosting
 import os, re
 import pandas as pd
 import numpy as np
 
-from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.model_selection import train_test_split, GridSearchCV, StratifiedKFold
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.impute import SimpleImputer
-from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.metrics import accuracy_score
+from sklearn.ensemble import GradientBoostingClassifier
 
 # Finn datafil
 for p in ["data/train.csv", "train.csv"]:
@@ -22,75 +22,75 @@ else:
 # 1) Les
 df = pd.read_csv(DATA_PATH)
 
-# 2) Feature engineering: Title + CabinLetter + FamilySize/IsAlone
+# 2) Feature engineering
 def extract_title(name):
-    m = re.search(r",\s*([^\.]+)\.", name)
+    m = re.search(r",\s*([^\.]+)\.", str(name))
     return m.group(1).strip() if m else "Unknown"
 
 df["Title"] = df["Name"].apply(extract_title)
 
-# slå sammen sjeldne titler
 title_map = {
-    "Mlle":"Miss", "Ms":"Miss", "Mme":"Mrs",
-    "Lady":"Noble", "Countess":"Noble", "Sir":"Noble", "Don":"Noble",
-    "Jonkheer":"Noble", "Dona":"Noble", "Capt":"Officer", "Col":"Officer",
-    "Major":"Officer", "Dr":"Officer", "Rev":"Clergy"
+    "Mlle":"Miss","Ms":"Miss","Mme":"Mrs",
+    "Lady":"Noble","Countess":"Noble","Sir":"Noble","Don":"Noble","Jonkheer":"Noble","Dona":"Noble",
+    "Capt":"Officer","Col":"Officer","Major":"Officer","Dr":"Officer","Rev":"Clergy"
 }
 df["Title"] = df["Title"].replace(title_map)
 
-# CabinLetter = første bokstav i Cabin
 df["CabinLetter"] = df["Cabin"].fillna("Unknown").astype(str).str[0]
-df.loc[df["CabinLetter"].isin(["n","U"]), "CabinLetter"] = "Unknown"  # noen filer kan ha 'n'
+df["CabinLetter"] = df["CabinLetter"].replace({"n":"Unknown","U":"Unknown"})
 
-# FamilySize/IsAlone
 df["FamilySize"] = df["SibSp"] + df["Parch"] + 1
 df["IsAlone"] = (df["FamilySize"] == 1).astype(int)
 
-# Velg kolonner
-cols = ["Survived","Pclass","Sex","Age","SibSp","Parch","Fare","Embarked","Title","CabinLetter","FamilySize","IsAlone"]
+# Interaksjon som ofte hjelper
+df["Pclass_Sex"] = df["Pclass"].astype(str) + "_" + df["Sex"].astype(str)
+
+cols = ["Survived","Pclass","Sex","Age","SibSp","Parch","Fare","Embarked",
+        "Title","CabinLetter","FamilySize","IsAlone","Pclass_Sex"]
 df = df[cols].copy()
 
-# X/y
 y = df["Survived"].astype(int)
 X = df.drop(columns=["Survived"])
 
-# Kolonnetyper
-num_cols = ["Age","Fare","SibSp","Parch","FamilySize","Pclass","IsAlone"]
-cat_cols = ["Sex","Embarked","Title","CabinLetter"]
+num_cols = ["Age","Fare","SibSp","Parch","FamilySize"]
+cat_cols = ["Sex","Embarked","Title","CabinLetter","Pclass","Pclass_Sex","IsAlone"]
 
-# Preprosess
 num_pipe = Pipeline([("imp", SimpleImputer(strategy="median"))])
-cat_pipe = Pipeline([("imp", SimpleImputer(strategy="most_frequent")),
-                     ("oh", OneHotEncoder(handle_unknown="ignore"))])
+cat_pipe = Pipeline([
+    ("imp", SimpleImputer(strategy="most_frequent")),
+    ("oh", OneHotEncoder(handle_unknown="ignore"))
+])
 
-pre = ColumnTransformer([("num", num_pipe, num_cols),
-                         ("cat", cat_pipe, cat_cols)])
+pre = ColumnTransformer([
+    ("num", num_pipe, num_cols),
+    ("cat", cat_pipe, cat_cols),
+])
 
-# Modeller: Gradient Boosting (ofte bedre enn RF på Titanic) + RF som referanse
-gb = Pipeline([("pre", pre),
-               ("mdl", GradientBoostingClassifier(random_state=42))])
+gb = GradientBoostingClassifier(random_state=42)
 
-rf = Pipeline([("pre", pre),
-               ("mdl", RandomForestClassifier(n_estimators=500, min_samples_split=4,
-                                              random_state=42))])
+pipe = Pipeline([
+    ("pre", pre),
+    ("gb", gb)
+])
 
-# Split
+# Tuning – liten, rask grid
+param_grid = {
+    "gb__n_estimators": [150, 250, 350],
+    "gb__learning_rate": [0.05, 0.08, 0.1],
+    "gb__max_depth": [2, 3],
+    "gb__min_samples_split": [2, 4],
+    "gb__min_samples_leaf": [1, 2],
+}
+
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+gs = GridSearchCV(pipe, param_grid, cv=cv, scoring="accuracy", n_jobs=-1)
 X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
 
-# Tren og evaluer
-gb.fit(X_tr, y_tr)
-rf.fit(X_tr, y_tr)
+gs.fit(X_tr, y_tr)
+best_pipe = gs.best_estimator_
 
-pred_gb = gb.predict(X_te)
-pred_rf = rf.predict(X_te)
+pred = best_pipe.predict(X_te)
+acc = accuracy_score(y_te, pred)
 
-acc_gb = accuracy_score(y_te, pred_gb)
-acc_rf = accuracy_score(y_te, pred_rf)
-
-print(f"GradientBoosting accuracy: {acc_gb:.3f}")
-print(f"RandomForest    accuracy: {acc_rf:.3f}")
-
-# Kryssvalidering for den beste
-best = gb if acc_gb >= acc_rf else rf
-cv = cross_val_score(best, X, y, cv=5, scoring="accuracy")
-print(f"Best model CV (5-fold): {cv.mean():.3f} ± {cv.std():.3f}")
+print(f"Hold-out accuracy: {acc:.3f}")
+print("Best params:", gs.best_params_)

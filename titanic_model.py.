@@ -1,55 +1,42 @@
 import pandas as pd
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import cross_val_score
 from sklearn.preprocessing import LabelEncoder
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score
+from sklearn.ensemble import GradientBoostingClassifier
 
 # Last inn datasettet
 df = pd.read_csv("train.csv")
 
-# -------- Feature engineering --------
 # Fyll inn manglende verdier
 df["Age"].fillna(df["Age"].median(), inplace=True)
 df["Embarked"].fillna(df["Embarked"].mode()[0], inplace=True)
 df["Fare"].fillna(df["Fare"].median(), inplace=True)
 
-# FamilySize
+# FamilySize + IsAlone
 df["FamilySize"] = df["SibSp"] + df["Parch"] + 1
+df["IsAlone"] = (df["FamilySize"] == 1).astype(int)
 
-# IsAlone
-df["IsAlone"] = 0
-df.loc[df["FamilySize"] == 1, "IsAlone"] = 1
-
-# Extract Title fra Name
+# Title
 df["Title"] = df["Name"].str.extract(" ([A-Za-z]+)\.", expand=False)
 df["Title"] = df["Title"].replace(
-    ['Lady', 'Countess', 'Capt', 'Col', 'Don', 'Dr', 'Major', 'Rev', 
-     'Sir', 'Jonkheer', 'Dona'],
-    'Rare'
-)
-df["Title"] = df["Title"].replace({'Mlle': 'Miss', 'Ms': 'Miss', 'Mme': 'Mrs'})
+    ['Lady','Countess','Capt','Col','Don','Dr','Major','Rev',
+     'Sir','Jonkheer','Dona'],'Rare')
+df["Title"] = df["Title"].replace({'Mlle':'Miss','Ms':'Miss','Mme':'Mrs'})
 
 # Label encode kategoriske variabler
 label = LabelEncoder()
-for col in ["Sex", "Embarked", "Title"]:
+for col in ["Sex","Embarked","Title"]:
     df[col] = label.fit_transform(df[col])
 
-# Velg features og target
-features = ["Pclass", "Sex", "Age", "Fare", "Embarked", 
-            "FamilySize", "IsAlone", "Title"]
+# Features
+features = ["Pclass","Sex","Age","Fare","Embarked",
+            "FamilySize","IsAlone","Title"]
 X = df[features]
 y = df["Survived"]
 
-# Split data
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
-)
-
 # Modell
-model = RandomForestClassifier(n_estimators=200, random_state=42)
-model.fit(X_train, y_train)
-y_pred = model.predict(X_test)
+model = GradientBoostingClassifier(random_state=42)
 
-# Accuracy
-acc = accuracy_score(y_test, y_pred)
-print("Accuracy:", acc)
+# Kryssvalidering (5 folds gir mer robust score)
+scores = cross_val_score(model, X, y, cv=5, scoring="accuracy")
+
+print("Cross-validated accuracy:", scores.mean())

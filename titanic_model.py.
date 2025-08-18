@@ -1,34 +1,34 @@
-# Titanic – pipeline med Title/CabinLetter + GridSearch på GradientBoosting
+# Titanic – HistGradientBoosting + enkle features
 import os, re
 import pandas as pd
 import numpy as np
 
-from sklearn.model_selection import train_test_split, GridSearchCV, StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.impute import SimpleImputer
+from sklearn.experimental import enable_hist_gradient_boosting  # noqa: F401
+from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.metrics import accuracy_score
-from sklearn.ensemble import GradientBoostingClassifier
 
 # Finn datafil
+DATA_PATH = None
 for p in ["data/train.csv", "train.csv"]:
     if os.path.exists(p):
         DATA_PATH = p
         break
-else:
+if DATA_PATH is None:
     raise FileNotFoundError("Fant ikke data/train.csv eller train.csv")
 
-# 1) Les
+# Les
 df = pd.read_csv(DATA_PATH)
 
-# 2) Feature engineering
+# Title fra Name
 def extract_title(name):
     m = re.search(r",\s*([^\.]+)\.", str(name))
     return m.group(1).strip() if m else "Unknown"
-
 df["Title"] = df["Name"].apply(extract_title)
-
 title_map = {
     "Mlle":"Miss","Ms":"Miss","Mme":"Mrs",
     "Lady":"Noble","Countess":"Noble","Sir":"Noble","Don":"Noble","Jonkheer":"Noble","Dona":"Noble",
@@ -36,24 +36,28 @@ title_map = {
 }
 df["Title"] = df["Title"].replace(title_map)
 
+# CabinLetter
 df["CabinLetter"] = df["Cabin"].fillna("Unknown").astype(str).str[0]
 df["CabinLetter"] = df["CabinLetter"].replace({"n":"Unknown","U":"Unknown"})
 
+# Family-features
 df["FamilySize"] = df["SibSp"] + df["Parch"] + 1
 df["IsAlone"] = (df["FamilySize"] == 1).astype(int)
 
-# Interaksjon som ofte hjelper
-df["Pclass_Sex"] = df["Pclass"].astype(str) + "_" + df["Sex"].astype(str)
+# Fare- og Age-bins (diskretisering hjelper ofte)
+df["FareBin"] = pd.qcut(df["Fare"], q=4, duplicates="drop")
+df["AgeBin"] = pd.cut(df["Age"], bins=[0,12,18,35,50,80], include_lowest=True)
 
-cols = ["Survived","Pclass","Sex","Age","SibSp","Parch","Fare","Embarked",
-        "Title","CabinLetter","FamilySize","IsAlone","Pclass_Sex"]
+cols = ["Survived","Pclass","Sex","Embarked","Title","CabinLetter",
+        "FamilySize","IsAlone","FareBin","AgeBin"]
 df = df[cols].copy()
 
 y = df["Survived"].astype(int)
 X = df.drop(columns=["Survived"])
 
-num_cols = ["Age","Fare","SibSp","Parch","FamilySize"]
-cat_cols = ["Sex","Embarked","Title","CabinLetter","Pclass","Pclass_Sex","IsAlone"]
+# Kategoriske/numeriske (alle her håndteres som kategoriske via one-hot)
+cat_cols = X.columns.tolist()
+num_cols: list[str] = []
 
 num_pipe = Pipeline([("imp", SimpleImputer(strategy="median"))])
 cat_pipe = Pipeline([
@@ -66,31 +70,25 @@ pre = ColumnTransformer([
     ("cat", cat_pipe, cat_cols),
 ])
 
-gb = GradientBoostingClassifier(random_state=42)
+# HistGradientBoosting
+hgb = HistGradientBoostingClassifier(
+    learning_rate=0.06,
+    max_depth=3,
+    max_iter=300,
+    l2_regularization=0.0,
+    random_state=7
+)
 
-pipe = Pipeline([
-    ("pre", pre),
-    ("gb", gb)
-])
+pipe = Pipeline([("pre", pre), ("hgb", hgb)])
 
-# Tuning – liten, rask grid
-param_grid = {
-    "gb__n_estimators": [150, 250, 350],
-    "gb__learning_rate": [0.05, 0.08, 0.1],
-    "gb__max_depth": [2, 3],
-    "gb__min_samples_split": [2, 4],
-    "gb__min_samples_leaf": [1, 2],
-}
-
-cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-gs = GridSearchCV(pipe, param_grid, cv=cv, scoring="accuracy", n_jobs=-1)
-X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
-
-gs.fit(X_tr, y_tr)
-best_pipe = gs.best_estimator_
-
-pred = best_pipe.predict(X_te)
+# Hold-out
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, stratify=y, random_state=7)
+pipe.fit(X_tr, y_tr)
+pred = pipe.predict(X_te)
 acc = accuracy_score(y_te, pred)
-
 print(f"Hold-out accuracy: {acc:.3f}")
-print("Best params:", gs.best_params_)
+
+# 5-fold CV som mer stabilt mål
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=7)
+cv_scores = cross_val_score(pipe, X, y, cv=cv, scoring="accuracy", n_jobs=-1)
+print(f"5-fold CV: {cv_scores.mean():.3f} ± {cv_scores.std():.3f}")

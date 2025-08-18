@@ -6,27 +6,56 @@ from xgboost import XGBClassifier
 # Last inn Titanic data
 data = pd.read_csv("titanic.csv")
 
-# Feature engineering (enkle, men nyttige trekk)
+# ---------- Feature Engineering ----------
+# Kjønn til tall
 data['Sex'] = data['Sex'].map({'male': 0, 'female': 1})
+
+# Manglende verdier
 data['Age'].fillna(data['Age'].median(), inplace=True)
+data['Fare'].fillna(data['Fare'].median(), inplace=True)
 data['Embarked'].fillna(data['Embarked'].mode()[0], inplace=True)
+
+# Gjør Embarked numerisk
 data['Embarked'] = data['Embarked'].map({'S': 0, 'C': 1, 'Q': 2})
 
-# Velg features
-features = ['Pclass', 'Sex', 'Age', 'SibSp', 'Parch', 'Fare', 'Embarked']
+# FamilySize
+data['FamilySize'] = data['SibSp'] + data['Parch'] + 1
+
+# IsAlone
+data['IsAlone'] = 1
+data.loc[data['FamilySize'] > 1, 'IsAlone'] = 0
+
+# Title fra Name
+data['Title'] = data['Name'].str.extract(' ([A-Za-z]+)\.', expand=False)
+data['Title'] = data['Title'].replace(['Mlle', 'Ms'], 'Miss')
+data['Title'] = data['Title'].replace(['Mme'], 'Mrs')
+data['Title'] = data['Title'].replace(
+    ['Countess','Lady','Sir','Jonkheer','Don','Dona','Rev','Col','Capt','Major','Dr'],
+    'Rare'
+)
+
+# One-hot encode Title (gjør kategorier til kolonner)
+data = pd.get_dummies(data, columns=['Title'])
+
+# ---------- Features ----------
+features = [
+    'Pclass','Sex','Age','SibSp','Parch','Fare','Embarked',
+    'FamilySize','IsAlone'
+] + [col for col in data.columns if col.startswith('Title_')]
+
 X = data[features]
 y = data['Survived']
 
-# Split data
+# ---------- Train/Test Split ----------
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42
 )
 
-# Bygg XGBoost-modell
+# ---------- XGBoost Model ----------
 model = XGBClassifier(
-    n_estimators=200,
-    max_depth=4,
-    learning_rate=0.05,
+    n_estimators=300,
+    max_depth=5,
+    learning_rate=0.03,
     subsample=0.8,
     colsample_bytree=0.8,
     random_state=42,
@@ -34,12 +63,9 @@ model = XGBClassifier(
     eval_metric="logloss"
 )
 
-# Tren modell
 model.fit(X_train, y_train)
-
-# Prediksjon
 y_pred = model.predict(X_test)
 
-# Evaluer
+# ---------- Resultat ----------
 accuracy = accuracy_score(y_test, y_pred)
-print(f"XGBoost Model Accuracy: {accuracy:.2f}")
+print(f"XGBoost Model Accuracy with Feature Engineering: {accuracy:.4f}")

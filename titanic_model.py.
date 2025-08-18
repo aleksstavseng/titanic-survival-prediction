@@ -1,26 +1,38 @@
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 
-# Last inn Titanic-datasettet fra Kaggle-format (CSV må ligge i samme mappe)
+# Last inn datasettet
 data = pd.read_csv("train.csv")
 
-# Velger ut noen enkle features
-X = data[["Pclass", "Age", "SibSp", "Fare"]].fillna(0)
-y = data["Survived"]
+# Fyll inn manglende verdier
+data['Age'].fillna(data['Age'].median(), inplace=True)
+data['Embarked'].fillna(data['Embarked'].mode()[0], inplace=True)
 
-# Splitt data i trening og test
+# Gjør om kategoriske verdier til tall
+data['Sex'] = data['Sex'].map({'male': 0, 'female': 1})
+data['Embarked'] = data['Embarked'].map({'S': 0, 'C': 1, 'Q': 2})
+
+# Velg features (flere kolonner nå)
+X = data[['Pclass', 'Sex', 'Age', 'Fare', 'SibSp', 'Parch', 'Embarked']]
+y = data['Survived']
+
+# Splitt data i trenings- og testsett
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42
 )
 
-# Tren modell
-model = LogisticRegression(max_iter=200)
+# Bygg en Random Forest modell
+model = RandomForestClassifier(
+    n_estimators=200,   # Antall trær
+    max_depth=7,        # Maks dybde på trærne
+    random_state=42
+)
 model.fit(X_train, y_train)
 
-# Test modell
+# Prediksjoner
 y_pred = model.predict(X_test)
-accuracy = accuracy_score(y_test, y_pred)
 
-print("Accuracy:", accuracy)
+# Print accuracy
+print("Accuracy:", accuracy_score(y_test, y_pred))

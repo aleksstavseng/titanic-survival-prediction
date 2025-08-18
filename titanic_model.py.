@@ -1,42 +1,45 @@
 import pandas as pd
-from sklearn.model_selection import cross_val_score
-from sklearn.preprocessing import LabelEncoder
-from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+from xgboost import XGBClassifier
 
-# Last inn datasettet
-df = pd.read_csv("train.csv")
+# Last inn Titanic data
+data = pd.read_csv("titanic.csv")
 
-# Fyll inn manglende verdier
-df["Age"].fillna(df["Age"].median(), inplace=True)
-df["Embarked"].fillna(df["Embarked"].mode()[0], inplace=True)
-df["Fare"].fillna(df["Fare"].median(), inplace=True)
+# Feature engineering (enkle, men nyttige trekk)
+data['Sex'] = data['Sex'].map({'male': 0, 'female': 1})
+data['Age'].fillna(data['Age'].median(), inplace=True)
+data['Embarked'].fillna(data['Embarked'].mode()[0], inplace=True)
+data['Embarked'] = data['Embarked'].map({'S': 0, 'C': 1, 'Q': 2})
 
-# FamilySize + IsAlone
-df["FamilySize"] = df["SibSp"] + df["Parch"] + 1
-df["IsAlone"] = (df["FamilySize"] == 1).astype(int)
+# Velg features
+features = ['Pclass', 'Sex', 'Age', 'SibSp', 'Parch', 'Fare', 'Embarked']
+X = data[features]
+y = data['Survived']
 
-# Title
-df["Title"] = df["Name"].str.extract(" ([A-Za-z]+)\.", expand=False)
-df["Title"] = df["Title"].replace(
-    ['Lady','Countess','Capt','Col','Don','Dr','Major','Rev',
-     'Sir','Jonkheer','Dona'],'Rare')
-df["Title"] = df["Title"].replace({'Mlle':'Miss','Ms':'Miss','Mme':'Mrs'})
+# Split data
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
 
-# Label encode kategoriske variabler
-label = LabelEncoder()
-for col in ["Sex","Embarked","Title"]:
-    df[col] = label.fit_transform(df[col])
+# Bygg XGBoost-modell
+model = XGBClassifier(
+    n_estimators=200,
+    max_depth=4,
+    learning_rate=0.05,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    random_state=42,
+    use_label_encoder=False,
+    eval_metric="logloss"
+)
 
-# Features
-features = ["Pclass","Sex","Age","Fare","Embarked",
-            "FamilySize","IsAlone","Title"]
-X = df[features]
-y = df["Survived"]
+# Tren modell
+model.fit(X_train, y_train)
 
-# Modell
-model = GradientBoostingClassifier(random_state=42)
+# Prediksjon
+y_pred = model.predict(X_test)
 
-# Kryssvalidering (5 folds gir mer robust score)
-scores = cross_val_score(model, X, y, cv=5, scoring="accuracy")
-
-print("Cross-validated accuracy:", scores.mean())
+# Evaluer
+accuracy = accuracy_score(y_test, y_pred)
+print(f"XGBoost Model Accuracy: {accuracy:.2f}")

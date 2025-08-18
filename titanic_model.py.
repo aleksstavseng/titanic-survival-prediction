@@ -1,38 +1,55 @@
 import pandas as pd
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 
 # Last inn datasettet
-data = pd.read_csv("train.csv")
+df = pd.read_csv("train.csv")
 
+# -------- Feature engineering --------
 # Fyll inn manglende verdier
-data['Age'].fillna(data['Age'].median(), inplace=True)
-data['Embarked'].fillna(data['Embarked'].mode()[0], inplace=True)
+df["Age"].fillna(df["Age"].median(), inplace=True)
+df["Embarked"].fillna(df["Embarked"].mode()[0], inplace=True)
+df["Fare"].fillna(df["Fare"].median(), inplace=True)
 
-# Gjør om kategoriske verdier til tall
-data['Sex'] = data['Sex'].map({'male': 0, 'female': 1})
-data['Embarked'] = data['Embarked'].map({'S': 0, 'C': 1, 'Q': 2})
+# FamilySize
+df["FamilySize"] = df["SibSp"] + df["Parch"] + 1
 
-# Velg features (flere kolonner nå)
-X = data[['Pclass', 'Sex', 'Age', 'Fare', 'SibSp', 'Parch', 'Embarked']]
-y = data['Survived']
+# IsAlone
+df["IsAlone"] = 0
+df.loc[df["FamilySize"] == 1, "IsAlone"] = 1
 
-# Splitt data i trenings- og testsett
+# Extract Title fra Name
+df["Title"] = df["Name"].str.extract(" ([A-Za-z]+)\.", expand=False)
+df["Title"] = df["Title"].replace(
+    ['Lady', 'Countess', 'Capt', 'Col', 'Don', 'Dr', 'Major', 'Rev', 
+     'Sir', 'Jonkheer', 'Dona'],
+    'Rare'
+)
+df["Title"] = df["Title"].replace({'Mlle': 'Miss', 'Ms': 'Miss', 'Mme': 'Mrs'})
+
+# Label encode kategoriske variabler
+label = LabelEncoder()
+for col in ["Sex", "Embarked", "Title"]:
+    df[col] = label.fit_transform(df[col])
+
+# Velg features og target
+features = ["Pclass", "Sex", "Age", "Fare", "Embarked", 
+            "FamilySize", "IsAlone", "Title"]
+X = df[features]
+y = df["Survived"]
+
+# Split data
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42
 )
 
-# Bygg en Random Forest modell
-model = RandomForestClassifier(
-    n_estimators=200,   # Antall trær
-    max_depth=7,        # Maks dybde på trærne
-    random_state=42
-)
+# Modell
+model = RandomForestClassifier(n_estimators=200, random_state=42)
 model.fit(X_train, y_train)
-
-# Prediksjoner
 y_pred = model.predict(X_test)
 
-# Print accuracy
-print("Accuracy:", accuracy_score(y_test, y_pred))
+# Accuracy
+acc = accuracy_score(y_test, y_pred)
+print("Accuracy:", acc)

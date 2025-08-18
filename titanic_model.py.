@@ -1,94 +1,26 @@
-# Titanic – HistGradientBoosting + enkle features
-import os, re
 import pandas as pd
-import numpy as np
-
-from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
-from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.impute import SimpleImputer
-from sklearn.experimental import enable_hist_gradient_boosting  # noqa: F401
-from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 
-# Finn datafil
-DATA_PATH = None
-for p in ["data/train.csv", "train.csv"]:
-    if os.path.exists(p):
-        DATA_PATH = p
-        break
-if DATA_PATH is None:
-    raise FileNotFoundError("Fant ikke data/train.csv eller train.csv")
+# Last inn Titanic-datasettet fra Kaggle-format (CSV må ligge i samme mappe)
+data = pd.read_csv("train.csv")
 
-# Les
-df = pd.read_csv(DATA_PATH)
+# Velger ut noen enkle features
+X = data[["Pclass", "Age", "SibSp", "Fare"]].fillna(0)
+y = data["Survived"]
 
-# Title fra Name
-def extract_title(name):
-    m = re.search(r",\s*([^\.]+)\.", str(name))
-    return m.group(1).strip() if m else "Unknown"
-df["Title"] = df["Name"].apply(extract_title)
-title_map = {
-    "Mlle":"Miss","Ms":"Miss","Mme":"Mrs",
-    "Lady":"Noble","Countess":"Noble","Sir":"Noble","Don":"Noble","Jonkheer":"Noble","Dona":"Noble",
-    "Capt":"Officer","Col":"Officer","Major":"Officer","Dr":"Officer","Rev":"Clergy"
-}
-df["Title"] = df["Title"].replace(title_map)
-
-# CabinLetter
-df["CabinLetter"] = df["Cabin"].fillna("Unknown").astype(str).str[0]
-df["CabinLetter"] = df["CabinLetter"].replace({"n":"Unknown","U":"Unknown"})
-
-# Family-features
-df["FamilySize"] = df["SibSp"] + df["Parch"] + 1
-df["IsAlone"] = (df["FamilySize"] == 1).astype(int)
-
-# Fare- og Age-bins (diskretisering hjelper ofte)
-df["FareBin"] = pd.qcut(df["Fare"], q=4, duplicates="drop")
-df["AgeBin"] = pd.cut(df["Age"], bins=[0,12,18,35,50,80], include_lowest=True)
-
-cols = ["Survived","Pclass","Sex","Embarked","Title","CabinLetter",
-        "FamilySize","IsAlone","FareBin","AgeBin"]
-df = df[cols].copy()
-
-y = df["Survived"].astype(int)
-X = df.drop(columns=["Survived"])
-
-# Kategoriske/numeriske (alle her håndteres som kategoriske via one-hot)
-cat_cols = X.columns.tolist()
-num_cols: list[str] = []
-
-num_pipe = Pipeline([("imp", SimpleImputer(strategy="median"))])
-cat_pipe = Pipeline([
-    ("imp", SimpleImputer(strategy="most_frequent")),
-    ("oh", OneHotEncoder(handle_unknown="ignore"))
-])
-
-pre = ColumnTransformer([
-    ("num", num_pipe, num_cols),
-    ("cat", cat_pipe, cat_cols),
-])
-
-# HistGradientBoosting
-hgb = HistGradientBoostingClassifier(
-    learning_rate=0.06,
-    max_depth=3,
-    max_iter=300,
-    l2_regularization=0.0,
-    random_state=7
+# Splitt data i trening og test
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
 )
 
-pipe = Pipeline([("pre", pre), ("hgb", hgb)])
+# Tren modell
+model = LogisticRegression(max_iter=200)
+model.fit(X_train, y_train)
 
-# Hold-out
-X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, stratify=y, random_state=7)
-pipe.fit(X_tr, y_tr)
-pred = pipe.predict(X_te)
-acc = accuracy_score(y_te, pred)
-print(f"Hold-out accuracy: {acc:.3f}")
+# Test modell
+y_pred = model.predict(X_test)
+accuracy = accuracy_score(y_test, y_pred)
 
-# 5-fold CV som mer stabilt mål
-cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=7)
-cv_scores = cross_val_score(pipe, X, y, cv=cv, scoring="accuracy", n_jobs=-1)
-print(f"5-fold CV: {cv_scores.mean():.3f} ± {cv_scores.std():.3f}")
+print("Accuracy:", accuracy)

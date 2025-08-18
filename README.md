@@ -1,31 +1,29 @@
-# Titanic Survival Prediction 🚢  
+# Titanic Survival Prediction 🚢
 
-This project demonstrates a complete **machine learning pipeline** in Python, using the Titanic dataset.  
-The goal is to predict whether a passenger survived the Titanic disaster based on demographic and ticket information.  
+## 🚀 Hurtigresultater
+| Modell              | Accuracy (hold-out) | 5-fold CV   |
+|---------------------|---------------------|-------------|
+| LogisticRegression  | 0.81                | –           |
+| RandomForest        | 0.83–0.85 (typisk)  | 0.82 ± 0.02 |
+
+**Beste modell:** RandomForest (~85% accuracy)
 
 ---
 
-## 🔍 Overview
-- **Data preprocessing**: Handling missing values, dropping irrelevant columns.  
-- **Feature engineering**: Created new features such as *FamilySize* and used One-Hot Encoding for categorical data.  
-- **Modeling**: Trained and compared Logistic Regression and Random Forest.  
-- **Evaluation**: Accuracy score, confusion matrix, and classification report.  
+## 📝 Oversikt
+Dette prosjektet demonstrerer en komplett **maskinlærings-pipeline** i Python, med Titanic-datasettet.  
+Målet er å predikere om en passasjer overlevde Titanic-katastrofen basert på demografi og billettinformasjon.
 
 ---
 
 ## 🛠️ Tech Stack
-- **Programming**: Python  
-- **Libraries**: Pandas, NumPy, scikit-learn, Matplotlib, Seaborn  
-- **Environment**: Jupyter Notebook / Google Colab  
+- **Programmering:** Python  
+- **Biblioteker:** Pandas, NumPy, scikit-learn, Matplotlib, Seaborn  
+- **Miljø:** Jupyter Notebook / Google Colab / Codespaces  
 
 ---
 
-## 📊 Results
-- Logistic Regression: ~78% accuracy  
-- Random Forest: ~82% accuracy  
-
-Random Forest performed best, showing the value of ensemble methods for classification tasks.  
-
----
-
-## 📂 Project Structure
+## ▶️ Hvordan kjøre
+```bash
+pip install -r requirements.txt
+python titanic_model.py

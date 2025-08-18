@@ -1,83 +1,96 @@
-# Forbedret Titanic-modell – enkel å forstå
-# Gir ofte ~0.84–0.86 accuracy
-import os
+# Titanic – forbedret modell med Title & CabinLetter + Gradient Boosting
+import os, re
 import pandas as pd
+import numpy as np
+
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.impute import SimpleImputer
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.metrics import accuracy_score
 
-# Finn datafilen (støtter både data/train.csv og train.csv)
-CANDIDATES = ["data/train.csv", "train.csv"]
-DATA_PATH = None
-for p in CANDIDATES:
+# Finn datafil
+for p in ["data/train.csv", "train.csv"]:
     if os.path.exists(p):
         DATA_PATH = p
         break
-if DATA_PATH is None:
+else:
     raise FileNotFoundError("Fant ikke data/train.csv eller train.csv")
 
-# 1) Les data
+# 1) Les
 df = pd.read_csv(DATA_PATH)
 
-# 2) Velg nyttige kolonner og lag enkle features
-use_cols = ["Survived","Pclass","Sex","Age","SibSp","Parch","Fare","Embarked"]
-df = df[use_cols].copy()
+# 2) Feature engineering: Title + CabinLetter + FamilySize/IsAlone
+def extract_title(name):
+    m = re.search(r",\s*([^\.]+)\.", name)
+    return m.group(1).strip() if m else "Unknown"
 
-# FamilySize og IsAlone hjelper ofte
+df["Title"] = df["Name"].apply(extract_title)
+
+# slå sammen sjeldne titler
+title_map = {
+    "Mlle":"Miss", "Ms":"Miss", "Mme":"Mrs",
+    "Lady":"Noble", "Countess":"Noble", "Sir":"Noble", "Don":"Noble",
+    "Jonkheer":"Noble", "Dona":"Noble", "Capt":"Officer", "Col":"Officer",
+    "Major":"Officer", "Dr":"Officer", "Rev":"Clergy"
+}
+df["Title"] = df["Title"].replace(title_map)
+
+# CabinLetter = første bokstav i Cabin
+df["CabinLetter"] = df["Cabin"].fillna("Unknown").astype(str).str[0]
+df.loc[df["CabinLetter"].isin(["n","U"]), "CabinLetter"] = "Unknown"  # noen filer kan ha 'n'
+
+# FamilySize/IsAlone
 df["FamilySize"] = df["SibSp"] + df["Parch"] + 1
 df["IsAlone"] = (df["FamilySize"] == 1).astype(int)
 
-# 3) Splitt X/y
+# Velg kolonner
+cols = ["Survived","Pclass","Sex","Age","SibSp","Parch","Fare","Embarked","Title","CabinLetter","FamilySize","IsAlone"]
+df = df[cols].copy()
+
+# X/y
 y = df["Survived"].astype(int)
 X = df.drop(columns=["Survived"])
 
-# 4) Definer numeriske og kategoriske felt
+# Kolonnetyper
 num_cols = ["Age","Fare","SibSp","Parch","FamilySize","Pclass","IsAlone"]
-cat_cols = ["Sex","Embarked"]
+cat_cols = ["Sex","Embarked","Title","CabinLetter"]
 
-# 5) Preprosessering: fyll inn manglende (median/modus) + one-hot for kategoriske
-numeric_transformer = Pipeline([
-    ("imputer", SimpleImputer(strategy="median"))
-])
-categorical_transformer = Pipeline([
-    ("imputer", SimpleImputer(strategy="most_frequent")),
-    ("onehot", OneHotEncoder(handle_unknown="ignore"))
-])
+# Preprosess
+num_pipe = Pipeline([("imp", SimpleImputer(strategy="median"))])
+cat_pipe = Pipeline([("imp", SimpleImputer(strategy="most_frequent")),
+                     ("oh", OneHotEncoder(handle_unknown="ignore"))])
 
-preprocess = ColumnTransformer([
-    ("num", numeric_transformer, num_cols),
-    ("cat", categorical_transformer, cat_cols),
-])
+pre = ColumnTransformer([("num", num_pipe, num_cols),
+                         ("cat", cat_pipe, cat_cols)])
 
-# 6) Modell: Random Forest (enkel, men sterk på dette datasettet)
-model = RandomForestClassifier(
-    n_estimators=400,
-    max_depth=None,
-    min_samples_split=4,
-    min_samples_leaf=1,
-    random_state=42
-)
+# Modeller: Gradient Boosting (ofte bedre enn RF på Titanic) + RF som referanse
+gb = Pipeline([("pre", pre),
+               ("mdl", GradientBoostingClassifier(random_state=42))])
 
-pipe = Pipeline([
-    ("prep", preprocess),
-    ("model", model)
-])
+rf = Pipeline([("pre", pre),
+               ("mdl", RandomForestClassifier(n_estimators=500, min_samples_split=4,
+                                              random_state=42))])
 
-# 7) Train/test-splitt
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42, stratify=y
-)
+# Split
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
 
-# 8) Tren og evaluer
-pipe.fit(X_train, y_train)
-preds = pipe.predict(X_test)
-acc = accuracy_score(y_test, preds)
-print(f"Accuracy (hold-out): {acc:.3f}")
+# Tren og evaluer
+gb.fit(X_tr, y_tr)
+rf.fit(X_tr, y_tr)
 
-# 9) (Valgfritt) 5-fold cross-val for mer stabilt mål
-cv_scores = cross_val_score(pipe, X, y, cv=5, scoring="accuracy")
-print(f"5-fold CV: {cv_scores.mean():.3f} ± {cv_scores.std():.3f}")
+pred_gb = gb.predict(X_te)
+pred_rf = rf.predict(X_te)
+
+acc_gb = accuracy_score(y_te, pred_gb)
+acc_rf = accuracy_score(y_te, pred_rf)
+
+print(f"GradientBoosting accuracy: {acc_gb:.3f}")
+print(f"RandomForest    accuracy: {acc_rf:.3f}")
+
+# Kryssvalidering for den beste
+best = gb if acc_gb >= acc_rf else rf
+cv = cross_val_score(best, X, y, cv=5, scoring="accuracy")
+print(f"Best model CV (5-fold): {cv.mean():.3f} ± {cv.std():.3f}")

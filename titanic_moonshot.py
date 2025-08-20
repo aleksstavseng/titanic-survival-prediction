@@ -1,4 +1,9 @@
- from pathlib import Path
+from pathlib import Path
+BASE = Path(__file__).resolve().parent
+TRAIN_PATH = BASE / "data" / "train.csv"
+TEST_PATH  = BASE / "data" / "test.csv"
+
+from pathlib import Path
 import os, re, warnings
 warnings.filterwarnings("ignore")
 
